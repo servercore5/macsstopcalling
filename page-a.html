@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Page A - Caller</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f1f1f1;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .container {
+      background: #fff;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .brand {
+      font-size: 20px;
+      font-weight: bold;
+      color: #2e7d32;
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+    }
+
+    h2 {
+      margin-top: 0;
+      margin-bottom: 20px;
+      color: #444;
+    }
+
+    button {
+      padding: 14px 30px;
+      font-size: 16px;
+      margin-top: 15px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: white;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #388e3c;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 16px;
+      color: #555;
+    }
+
+    #hangupBtn {
+      margin-top: 20px;
+      background-color: #d32f2f;
+      display: none;
+    }
+
+    #hangupBtn:hover {
+      background-color: #b71c1c;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="brand">MACSTOP CALLING PORTAL</div>
+    <h2>Caller (Page A)</h2>
+    <button id="callBtn">Call Customer</button>
+    <p id="status">Ready to call...</p>
+    <button id="hangupBtn">Hang Up</button>
+    <audio id="remoteAudio" autoplay></audio>
+    <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
+  </div>
+
+  <!-- Firebase & WebRTC Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script src="script.js"></script>
+
+  <script>
+    initFirebase();
+
+    const callBtn = document.getElementById("callBtn");
+    const hangupBtn = document.getElementById("hangupBtn");
+    const statusText = document.getElementById("status");
+    const ring = document.getElementById("ringtone");
+
+    let localPeer = null;
+
+    async function setupCaller() {
+      callBtn.onclick = async () => {
+        callBtn.disabled = true;
+        statusText.textContent = "📞 Ringing...";
+        hangupBtn.style.display = "inline-block";
+        ring.play();
+
+        const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+        localPeer = new RTCPeerConnection(servers);
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => localPeer.addTrack(track, stream));
+
+        localPeer.onicecandidate = e => {
+          if (e.candidate) {
+            firebase.database().ref(`my-call/callerCandidates`).push(JSON.stringify(e.candidate));
+          }
+        };
+
+        localPeer.ontrack = e => {
+          document.getElementById("remoteAudio").srcObject = e.streams[0];
+        };
+
+        const offer = await localPeer.createOffer();
+        await localPeer.setLocalDescription(offer);
+        firebase.database().ref(`my-call`).set({ offer: JSON.stringify(offer) });
+
+        firebase.database().ref(`my-call/answer`).on("value", async snapshot => {
+          const data = snapshot.val();
+          if (data && !localPeer.currentRemoteDescription) {
+            const answer = new RTCSessionDescription(JSON.parse(data));
+            await localPeer.setRemoteDescription(answer);
+            statusText.textContent = "✅ Call connected";
+            ring.pause();
+          }
+        });
+
+        firebase.database().ref(`my-call/receiverCandidates`).on("child_added", snapshot => {
+          const candidate = new RTCIceCandidate(JSON.parse(snapshot.val()));
+          localPeer.addIceCandidate(candidate);
+        });
+      };
+
+      hangupBtn.onclick = () => {
+        if (localPeer) {
+          localPeer.close();
+          localPeer = null;
+        }
+        statusText.textContent = "Call ended.";
+        callBtn.disabled = false;
+        hangupBtn.style.display = "none";
+        ring.pause();
+        ring.currentTime = 0;
+        firebase.database().ref(`my-call`).remove();
+      };
+    }
+
+    setupCaller();
+  </script>
+</body>
+</html>
