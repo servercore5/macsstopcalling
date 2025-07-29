@@ -2,99 +2,100 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Page B - Receiver</title>
+  <title>Receiver - MACSTOP Calling Portal</title>
   <style>
     body {
-      font-family: 'Segoe UI', sans-serif;
       margin: 0;
       padding: 0;
-      background: linear-gradient(to right, #e3f2fd, #ffffff);
+      background: #f4f6f9;
+      font-family: 'Segoe UI', sans-serif;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
       align-items: center;
+      justify-content: center;
       height: 100vh;
     }
 
     .container {
       background: #fff;
       padding: 40px;
-      border-radius: 12px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
       text-align: center;
-      width: 100%;
-      max-width: 400px;
     }
 
-    .brand {
-      font-size: 20px;
-      font-weight: bold;
-      color: #2e7d32;
-      margin-bottom: 10px;
-      letter-spacing: 1px;
-    }
-
-    h2 {
-      margin: 10px 0 20px;
+    h1 {
       color: #333;
+      margin-bottom: 10px;
     }
 
-    #status {
-      font-size: 16px;
-      margin-bottom: 20px;
+    p#status {
+      font-size: 18px;
       color: #555;
+      margin-bottom: 20px;
     }
 
     button {
-      padding: 12px 30px;
+      padding: 12px 25px;
       font-size: 16px;
       border: none;
-      border-radius: 8px;
+      border-radius: 5px;
+      margin: 10px;
       cursor: pointer;
-      margin: 10px 5px;
-      transition: background-color 0.3s ease;
       color: white;
+      background-color: #007bff;
+      transition: background 0.3s ease;
     }
 
-    #answerBtn {
-      background-color: #4CAF50;
-      display: none;
+    button:hover {
+      background-color: #0056b3;
     }
 
-    #answerBtn:hover {
-      background-color: #388e3c;
+    button#hangupBtn {
+      background-color: #dc3545;
     }
 
-    #hangupBtn {
-      background-color: #d32f2f;
-      display: none;
-    }
-
-    #hangupBtn:hover {
-      background-color: #b71c1c;
+    button#hangupBtn:hover {
+      background-color: #a71d2a;
     }
 
     .dialpad {
-      font-size: 32px;
-      color: #666;
-      margin-top: 30px;
-      user-select: none;
+      display: flex;
+      flex-wrap: wrap;
+      width: 160px;
+      margin: 20px auto;
     }
 
-    audio {
-      display: none;
+    .dialpad button {
+      width: 50px;
+      height: 50px;
+      margin: 5px;
+      font-size: 18px;
+      background-color: #28a745;
+    }
+
+    .dialpad button:hover {
+      background-color: #1e7e34;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="brand">MACSTOP CALLING PORTAL</div>
-    <h2>Receiver (Page B)</h2>
+    <h1>📞 MACSTOP Calling Portal</h1>
     <p id="status">Waiting for call...</p>
-    <button id="answerBtn">Answer</button>
-    <button id="hangupBtn">Hang Up</button>
-    <div class="dialpad">📞 Dial Pad</div>
+
+    <button id="answerBtn" style="display:none;">Answer</button>
+    <button id="hangupBtn" style="display:none;">Hang Up</button>
+
+    <div class="dialpad">
+      <button>1</button><button>2</button><button>3</button>
+      <button>4</button><button>5</button><button>6</button>
+      <button>7</button><button>8</button><button>9</button>
+      <button>*</button><button>0</button><button>#</button>
+    </div>
+
     <audio id="remoteAudio" autoplay></audio>
-    <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
+    <audio id="ringtone" src="https://assets.mixkit.co/sfx/preview/mixkit-classic-alarm-995.mp3" loop></audio>
   </div>
 
   <!-- Firebase & WebRTC Scripts -->
@@ -108,16 +109,16 @@
 
     const answerBtn = document.getElementById("answerBtn");
     const hangupBtn = document.getElementById("hangupBtn");
-    const statusText = document.getElementById("status");
-    const ring = document.getElementById("ringtone");
+    const status = document.getElementById("status");
+    const ringtone = document.getElementById("ringtone");
 
-    let peerConn = null;
+    setupReceiver();
 
     function setupReceiver() {
       const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
       peerConn = new RTCPeerConnection(servers);
 
-      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      getMediaStream().then(stream => {
         stream.getTracks().forEach(track => peerConn.addTrack(track, stream));
       });
 
@@ -127,49 +128,47 @@
 
       peerConn.onicecandidate = e => {
         if (e.candidate) {
-          firebase.database().ref(`my-call/receiverCandidates`).push(JSON.stringify(e.candidate));
+          db.ref(`${callId}/receiverCandidates`).push(JSON.stringify(e.candidate));
         }
       };
 
-      firebase.database().ref(`my-call`).on("value", async snapshot => {
+      db.ref(`${callId}`).on("value", async snapshot => {
         const data = snapshot.val();
         if (data && data.offer) {
-          statusText.textContent = "📞 Incoming call...";
+          status.innerText = "Incoming call...";
           answerBtn.style.display = "inline-block";
           hangupBtn.style.display = "inline-block";
-          ring.play();
+          ringtone.play();
 
           answerBtn.onclick = async () => {
+            ringtone.pause();
             const offer = new RTCSessionDescription(JSON.parse(data.offer));
             await peerConn.setRemoteDescription(offer);
 
             const answer = await peerConn.createAnswer();
             await peerConn.setLocalDescription(answer);
-            firebase.database().ref(`my-call/answer`).set(JSON.stringify(answer));
+            db.ref(`${callId}/answer`).set(JSON.stringify(answer));
 
-            statusText.textContent = "✅ Call connected";
-            ring.pause();
+            status.innerText = "Call connected ✅";
+            answerBtn.style.display = "none";
           };
 
           hangupBtn.onclick = () => {
             peerConn.close();
-            firebase.database().ref(`my-call`).remove();
+            status.innerText = "Call ended ❌";
             answerBtn.style.display = "none";
             hangupBtn.style.display = "none";
-            ring.pause();
-            ring.currentTime = 0;
-            statusText.textContent = "Call ended.";
+            ringtone.pause();
+            db.ref(`${callId}`).remove();
           };
         }
       });
 
-      firebase.database().ref(`my-call/callerCandidates`).on("child_added", snapshot => {
+      db.ref(`${callId}/callerCandidates`).on("child_added", snapshot => {
         const candidate = new RTCIceCandidate(JSON.parse(snapshot.val()));
         peerConn.addIceCandidate(candidate);
       });
     }
-
-    setupReceiver();
   </script>
 </body>
 </html>
