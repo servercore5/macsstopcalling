@@ -2,91 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Receiver - MACSTOP Calling Portal</title>
+  <title>Macstop Calling Portal - Receiver</title>
   <style>
     body {
-      margin: 0;
-      padding: 0;
-      background: #f4f6f9;
-      font-family: 'Segoe UI', sans-serif;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
       display: flex;
-      flex-direction: column;
-      align-items: center;
       justify-content: center;
+      align-items: center;
       height: 100vh;
     }
-
     .container {
-      background: #fff;
-      padding: 40px;
+      background: #ffffff;
+      padding: 30px 50px;
       border-radius: 10px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
       text-align: center;
     }
-
-    h1 {
-      color: #333;
+    h2 {
       margin-bottom: 10px;
+      color: #333;
     }
-
-    p#status {
-      font-size: 18px;
-      color: #555;
-      margin-bottom: 20px;
+    #status {
+      margin: 10px 0 20px;
+      font-size: 16px;
+      font-weight: bold;
     }
-
     button {
-      padding: 12px 25px;
+      margin: 10px;
+      padding: 12px 24px;
       font-size: 16px;
       border: none;
       border-radius: 5px;
-      margin: 10px;
       cursor: pointer;
       color: white;
-      background-color: #007bff;
-      transition: background 0.3s ease;
     }
-
-    button:hover {
-      background-color: #0056b3;
+    #answerBtn {
+      background-color: #4CAF50;
     }
-
-    button#hangupBtn {
-      background-color: #dc3545;
+    #hangupBtn {
+      background-color: #e53935;
+      display: none;
     }
-
-    button#hangupBtn:hover {
-      background-color: #a71d2a;
-    }
-
     .dialpad {
-      display: flex;
-      flex-wrap: wrap;
-      width: 160px;
-      margin: 20px auto;
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: repeat(3, 60px);
+      gap: 10px;
+      justify-content: center;
     }
-
     .dialpad button {
-      width: 50px;
-      height: 50px;
-      margin: 5px;
-      font-size: 18px;
-      background-color: #28a745;
+      background: #1976d2;
     }
-
-    .dialpad button:hover {
-      background-color: #1e7e34;
+    audio {
+      display: none;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>📞 MACSTOP Calling Portal</h1>
+    <h2>Macstop Calling Portal</h2>
     <p id="status">Waiting for call...</p>
-
     <button id="answerBtn" style="display:none;">Answer</button>
-    <button id="hangupBtn" style="display:none;">Hang Up</button>
-
+    <button id="hangupBtn">Hang Up</button>
+    
     <div class="dialpad">
       <button>1</button><button>2</button><button>3</button>
       <button>4</button><button>5</button><button>6</button>
@@ -95,24 +74,37 @@
     </div>
 
     <audio id="remoteAudio" autoplay></audio>
-    <audio id="ringtone" src="https://assets.mixkit.co/sfx/preview/mixkit-classic-alarm-995.mp3" loop></audio>
+    <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
   </div>
 
   <!-- Firebase & WebRTC Scripts -->
   <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
   <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
-  <script src="script.js"></script>
-
   <script>
-    initFirebase();
+    let peerConn;
+    let localStream;
+    let db;
+    let callId = "my-call";
 
-    const answerBtn = document.getElementById("answerBtn");
-    const hangupBtn = document.getElementById("hangupBtn");
-    const status = document.getElementById("status");
-    const ringtone = document.getElementById("ringtone");
+    function initFirebase() {
+      const firebaseConfig = {
+        apiKey: "AIzaSyAmWBSqhsChYspp8cnPwV9E7EOnyB4jcqE",
+        authDomain: "nonu-a2b10.firebaseapp.com",
+        databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "nonu-a2b10",
+        storageBucket: "nonu-a2b10.appspot.com",
+        messagingSenderId: "563739635078",
+        appId: "1:563739635078:web:52d355f0d9411317829007"
+      };
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
+    }
 
-    setupReceiver();
+    async function getMediaStream() {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      return localStream;
+    }
 
     function setupReceiver() {
       const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
@@ -134,14 +126,17 @@
 
       db.ref(`${callId}`).on("value", async snapshot => {
         const data = snapshot.val();
-        if (data && data.offer) {
-          status.innerText = "Incoming call...";
-          answerBtn.style.display = "inline-block";
-          hangupBtn.style.display = "inline-block";
+        if (data && data.offer && !peerConn.currentRemoteDescription) {
+          document.getElementById("status").innerText = "Incoming call...";
+          document.getElementById("answerBtn").style.display = "inline-block";
+
+          const ringtone = document.getElementById("ringtone");
           ringtone.play();
 
-          answerBtn.onclick = async () => {
+          document.getElementById("answerBtn").onclick = async () => {
             ringtone.pause();
+            ringtone.currentTime = 0;
+
             const offer = new RTCSessionDescription(JSON.parse(data.offer));
             await peerConn.setRemoteDescription(offer);
 
@@ -149,26 +144,30 @@
             await peerConn.setLocalDescription(answer);
             db.ref(`${callId}/answer`).set(JSON.stringify(answer));
 
-            status.innerText = "Call connected ✅";
-            answerBtn.style.display = "none";
-          };
-
-          hangupBtn.onclick = () => {
-            peerConn.close();
-            status.innerText = "Call ended ❌";
-            answerBtn.style.display = "none";
-            hangupBtn.style.display = "none";
-            ringtone.pause();
-            db.ref(`${callId}`).remove();
+            document.getElementById("status").innerText = "Call connected";
+            document.getElementById("answerBtn").style.display = "none";
+            document.getElementById("hangupBtn").style.display = "inline-block";
           };
         }
       });
 
       db.ref(`${callId}/callerCandidates`).on("child_added", snapshot => {
-        const candidate = new RTCIceCandidate(JSON.parse(snapshot.val()));
-        peerConn.addIceCandidate(candidate);
+        const candidate = JSON.parse(snapshot.val());
+        if (peerConn.remoteDescription) {
+          peerConn.addIceCandidate(new RTCIceCandidate(candidate));
+        }
       });
+
+      document.getElementById("hangupBtn").onclick = () => {
+        peerConn.close();
+        db.ref(callId).remove();
+        document.getElementById("status").innerText = "Call ended";
+        document.getElementById("hangupBtn").style.display = "none";
+      };
     }
+
+    initFirebase();
+    setupReceiver();
   </script>
 </body>
 </html>
