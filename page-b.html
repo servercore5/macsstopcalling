@@ -24,9 +24,14 @@
       color: #333;
     }
     #status {
-      margin: 10px 0 20px;
+      margin: 10px 0 10px;
       font-size: 16px;
       font-weight: bold;
+    }
+    #timer {
+      margin-bottom: 20px;
+      font-size: 16px;
+      color: #888;
     }
     button {
       margin: 10px;
@@ -63,9 +68,10 @@
   <div class="container">
     <h2>Macstop Calling Portal</h2>
     <p id="status">Waiting for call...</p>
+    <div id="timer"></div>
     <button id="answerBtn" style="display:none;">Answer</button>
     <button id="hangupBtn">Hang Up</button>
-    
+
     <div class="dialpad">
       <button>1</button><button>2</button><button>3</button>
       <button>4</button><button>5</button><button>6</button>
@@ -86,6 +92,24 @@
     let localStream;
     let db;
     let callId = "my-call";
+    let timerInterval;
+    let seconds = 0;
+
+    function startTimer() {
+      const timerDisplay = document.getElementById("timer");
+      timerInterval = setInterval(() => {
+        seconds++;
+        const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const secs = String(seconds % 60).padStart(2, '0');
+        timerDisplay.textContent = `Call Duration: ${mins}:${secs}`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+      seconds = 0;
+      document.getElementById("timer").textContent = "";
+    }
 
     function initFirebase() {
       const firebaseConfig = {
@@ -126,16 +150,22 @@
 
       db.ref(`${callId}`).on("value", async snapshot => {
         const data = snapshot.val();
+        if (!data) {
+          document.getElementById("status").textContent = "Call ended";
+          document.getElementById("hangupBtn").style.display = "none";
+          document.getElementById("answerBtn").style.display = "none";
+          stopTimer();
+          return;
+        }
+
         if (data && data.offer && !peerConn.currentRemoteDescription) {
           document.getElementById("status").innerText = "Incoming call...";
           document.getElementById("answerBtn").style.display = "inline-block";
-
-          const ringtone = document.getElementById("ringtone");
-          ringtone.play();
+          document.getElementById("ringtone").play();
 
           document.getElementById("answerBtn").onclick = async () => {
-            ringtone.pause();
-            ringtone.currentTime = 0;
+            document.getElementById("ringtone").pause();
+            document.getElementById("ringtone").currentTime = 0;
 
             const offer = new RTCSessionDescription(JSON.parse(data.offer));
             await peerConn.setRemoteDescription(offer);
@@ -147,6 +177,7 @@
             document.getElementById("status").innerText = "Call connected";
             document.getElementById("answerBtn").style.display = "none";
             document.getElementById("hangupBtn").style.display = "inline-block";
+            startTimer();
           };
         }
       });
@@ -163,6 +194,7 @@
         db.ref(callId).remove();
         document.getElementById("status").innerText = "Call ended";
         document.getElementById("hangupBtn").style.display = "none";
+        stopTimer();
       };
     }
 
