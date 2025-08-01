@@ -14,7 +14,6 @@
       align-items: center;
       height: 100vh;
     }
-
     .container {
       background: #fff;
       padding: 40px;
@@ -24,7 +23,6 @@
       width: 100%;
       max-width: 400px;
     }
-
     .brand {
       font-size: 20px;
       font-weight: bold;
@@ -32,44 +30,21 @@
       margin-bottom: 10px;
       letter-spacing: 1px;
     }
-
-    h2 {
-      margin-top: 0;
-      margin-bottom: 20px;
-      color: #444;
-    }
-
+    h2 { margin: 0 0 20px; color: #444; }
     button {
-      padding: 14px 30px;
-      font-size: 16px;
+      padding: 12px 24px;
       margin-top: 15px;
+      font-size: 16px;
       border: none;
       border-radius: 8px;
       cursor: pointer;
-      background-color: #4CAF50;
       color: white;
-      transition: background-color 0.3s ease;
     }
-
-    button:hover {
-      background-color: #388e3c;
-    }
-
-    #status {
-      margin-top: 20px;
-      font-size: 16px;
-      color: #555;
-    }
-
-    #hangupBtn {
-      margin-top: 20px;
-      background-color: #d32f2f;
-      display: none;
-    }
-
-    #hangupBtn:hover {
-      background-color: #b71c1c;
-    }
+    #callBtn { background-color: #4CAF50; }
+    #hangupBtn { background-color: #d32f2f; display: none; }
+    #muteBtn { background-color: #1976d2; display: none; }
+    #status { margin-top: 20px; font-weight: bold; color: #555; }
+    #timer { font-weight: bold; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -78,117 +53,30 @@
     <h2>Caller (Page A)</h2>
     <button id="callBtn">Call Customer</button>
     <p id="status">Ready to call...</p>
-    <p id="timer" style="font-weight: bold;"></p>
+    <p id="timer"></p>
+    <button id="muteBtn">Mute</button>
     <button id="hangupBtn">Hang Up</button>
     <audio id="remoteAudio" autoplay></audio>
     <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
   </div>
 
-  <!-- Firebase & WebRTC Scripts -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script src="script.js"></script>
   <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyAmWBSqhsChYspp8cnPwV9E7EOnyB4jcqE",
-      authDomain: "nonu-a2b10.firebaseapp.com",
-      databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "nonu-a2b10",
-      storageBucket: "nonu-a2b10.appspot.com",
-      messagingSenderId: "563739635078",
-      appId: "1:563739635078:web:52d355f0d9411317829007"
+    const muteBtn = document.getElementById("muteBtn");
+    let isMuted = false;
+    muteBtn.onclick = () => {
+      const tracks = localStream?.getAudioTracks?.();
+      if (tracks && tracks.length > 0) {
+        isMuted = !isMuted;
+        tracks[0].enabled = !isMuted;
+        muteBtn.textContent = isMuted ? "Unmute" : "Mute";
+      }
     };
-    firebase.initializeApp(firebaseConfig);
 
-    const callBtn = document.getElementById("callBtn");
-    const hangupBtn = document.getElementById("hangupBtn");
-    const statusText = document.getElementById("status");
-    const ring = document.getElementById("ringtone");
-    const timerEl = document.getElementById("timer");
-    const audio = document.getElementById("remoteAudio");
-
-    let localPeer = null;
-    let startTime;
-    let timerInterval;
-
-    async function setupCaller() {
-      callBtn.onclick = async () => {
-        callBtn.disabled = true;
-        statusText.textContent = "📞 Ringing...";
-        hangupBtn.style.display = "inline-block";
-        ring.play();
-
-        const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-        localPeer = new RTCPeerConnection(servers);
-
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(track => localPeer.addTrack(track, stream));
-
-        localPeer.onicecandidate = e => {
-          if (e.candidate) {
-            firebase.database().ref(`my-call/callerCandidates`).push(JSON.stringify(e.candidate));
-          }
-        };
-
-        localPeer.ontrack = e => {
-          audio.srcObject = e.streams[0];
-        };
-
-        const offer = await localPeer.createOffer();
-        await localPeer.setLocalDescription(offer);
-        firebase.database().ref(`my-call`).set({ offer: JSON.stringify(offer) });
-
-        firebase.database().ref(`my-call/answer`).on("value", async snapshot => {
-          const data = snapshot.val();
-          if (data && !localPeer.currentRemoteDescription) {
-            const answer = new RTCSessionDescription(JSON.parse(data));
-            await localPeer.setRemoteDescription(answer);
-            statusText.textContent = "✅ Call connected";
-            ring.pause();
-            ring.currentTime = 0;
-            startTimer();
-          }
-        });
-
-        firebase.database().ref(`my-call/end`).on("value", snapshot => {
-          if (snapshot.exists()) {
-            hangupCall();
-          }
-        });
-
-        firebase.database().ref(`my-call/receiverCandidates`).on("child_added", snapshot => {
-          const candidate = new RTCIceCandidate(JSON.parse(snapshot.val()));
-          localPeer.addIceCandidate(candidate);
-        });
-      };
-
-      hangupBtn.onclick = () => {
-        hangupCall();
-        firebase.database().ref(`my-call`).remove();
-      };
-    }
-
-    function hangupCall() {
-      if (localPeer) localPeer.close();
-      localPeer = null;
-      statusText.textContent = "Call ended.";
-      callBtn.disabled = false;
-      hangupBtn.style.display = "none";
-      timerEl.textContent = "";
-      clearInterval(timerInterval);
-    }
-
-    function startTimer() {
-      startTime = Date.now();
-      timerInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const minutes = Math.floor(elapsed / 60);
-        const seconds = elapsed % 60;
-        timerEl.textContent = `Call Duration: ${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
-      }, 1000);
-    }
-
-    setupCaller();
+    const remoteAudio = document.getElementById("remoteAudio");
+    remoteAudio.autoplay = true;
+    remoteAudio.muted = false;
+    remoteAudio.play().catch(err => console.warn("🔇 Audio autoplay failed:", err));
   </script>
 </body>
 </html>
