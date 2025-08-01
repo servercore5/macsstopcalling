@@ -7,7 +7,7 @@ function initFirebase() {
   const firebaseConfig = {
     apiKey: "AIzaSyAmWBSqhsChYspp8cnPwV9E7EOnyB4jcqE",
     authDomain: "nonu-a2b10.firebaseapp.com",
-    databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app", // ✅ FIXED
+    databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId: "nonu-a2b10",
     storageBucket: "nonu-a2b10.firebasestorage.app",
     messagingSenderId: "563739635078",
@@ -32,7 +32,17 @@ function setupCaller() {
     const statusText = document.getElementById("status");
     const hangupBtn = document.getElementById("hangupBtn");
 
-    const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+    const servers = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:relay1.expressturn.com:3478",
+          username: "efh4VvB3Zzq0PW0vwXxY",
+          credential: "tZjNFGnDqR3RFLQf"
+        }
+      ]
+    };
+
     peerConn = new RTCPeerConnection(servers);
 
     const stream = await getMediaStream();
@@ -52,7 +62,6 @@ function setupCaller() {
     await peerConn.setLocalDescription(offer);
     db.ref(`${callId}`).set({ offer: JSON.stringify(offer) });
 
-    // 🔔 Start Ringing UI
     if (ring) ring.play();
     if (statusText) statusText.textContent = "📞 Ringing...";
     if (hangupBtn) hangupBtn.style.display = "inline-block";
@@ -72,7 +81,6 @@ function setupCaller() {
       peerConn.addIceCandidate(candidate);
     });
 
-    // 📴 Hang Up button logic
     if (hangupBtn) {
       hangupBtn.onclick = () => {
         if (peerConn) {
@@ -100,7 +108,17 @@ function setupReceiver() {
   const answerBtn = document.getElementById("answerBtn");
   const hangupBtn = document.getElementById("hangupBtn");
 
-  const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+  const servers = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      {
+        urls: "turn:relay1.expressturn.com:3478",
+        username: "efh4VvB3Zzq0PW0vwXxY",
+        credential: "tZjNFGnDqR3RFLQf"
+      }
+    ]
+  };
+
   peerConn = new RTCPeerConnection(servers);
 
   getMediaStream().then(stream => {
