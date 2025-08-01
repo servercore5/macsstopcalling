@@ -1,45 +1,15 @@
+<!-- ✅ page-a.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>Page A - Caller</title>
   <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #f1f1f1;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-    .container {
-      background: #fff;
-      padding: 40px;
-      border-radius: 12px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
-      text-align: center;
-      width: 100%;
-      max-width: 400px;
-    }
-    .brand {
-      font-size: 20px;
-      font-weight: bold;
-      color: #2e7d32;
-      margin-bottom: 10px;
-      letter-spacing: 1px;
-    }
+    body { font-family: 'Segoe UI', sans-serif; background: #f1f1f1; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    .container { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1); text-align: center; width: 100%; max-width: 400px; }
+    .brand { font-size: 20px; font-weight: bold; color: #2e7d32; margin-bottom: 10px; letter-spacing: 1px; }
     h2 { margin: 0 0 20px; color: #444; }
-    button {
-      padding: 12px 24px;
-      margin-top: 15px;
-      font-size: 16px;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      color: white;
-    }
+    button { padding: 12px 24px; margin-top: 15px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; color: white; }
     #callBtn { background-color: #4CAF50; }
     #hangupBtn { background-color: #d32f2f; display: none; }
     #muteBtn { background-color: #1976d2; display: none; }
@@ -60,10 +30,36 @@
     <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
   </div>
 
-  <script src="script.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAmWBSqhsChYspp8cnPwV9E7EOnyB4jcqE",
+      authDomain: "nonu-a2b10.firebaseapp.com",
+      databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "nonu-a2b10",
+      storageBucket: "nonu-a2b10.appspot.com",
+      messagingSenderId: "563739635078",
+      appId: "1:563739635078:web:52d355f0d9411317829007"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const callBtn = document.getElementById("callBtn");
+    const hangupBtn = document.getElementById("hangupBtn");
     const muteBtn = document.getElementById("muteBtn");
+    const statusText = document.getElementById("status");
+    const ring = document.getElementById("ringtone");
+    const timerEl = document.getElementById("timer");
+    const audio = document.getElementById("remoteAudio");
+
+    let localStream = null;
+    let peerConn = null;
+    let startTime;
+    let timerInterval;
     let isMuted = false;
+
     muteBtn.onclick = () => {
       const tracks = localStream?.getAudioTracks?.();
       if (tracks && tracks.length > 0) {
@@ -73,10 +69,84 @@
       }
     };
 
-    const remoteAudio = document.getElementById("remoteAudio");
-    remoteAudio.autoplay = true;
-    remoteAudio.muted = false;
-    remoteAudio.play().catch(err => console.warn("🔇 Audio autoplay failed:", err));
+    callBtn.onclick = async () => {
+      callBtn.disabled = true;
+      statusText.textContent = "\uD83D\uDCDE Ringing...";
+      hangupBtn.style.display = "inline-block";
+      muteBtn.style.display = "inline-block";
+      ring.play();
+
+      const servers = {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:relay1.expressturn.com:3478",
+            username: "efh4VvB3Zzq0PW0vwXxY",
+            credential: "tZjNFGnDqR3RFLQf"
+          }
+        ]
+      };
+
+      peerConn = new RTCPeerConnection(servers);
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStream.getTracks().forEach(track => peerConn.addTrack(track, localStream));
+
+      peerConn.onicecandidate = e => {
+        if (e.candidate) {
+          db.ref(`my-call/callerCandidates`).push(JSON.stringify(e.candidate));
+        }
+      };
+
+      peerConn.ontrack = e => {
+        console.log("🔊 Got remote stream:", e.streams[0]);
+        audio.srcObject = e.streams[0];
+        audio.play().catch(err => console.warn("Audio play failed:", err));
+      };
+
+      const offer = await peerConn.createOffer();
+      await peerConn.setLocalDescription(offer);
+      db.ref(`my-call`).set({ offer: JSON.stringify(offer) });
+
+      db.ref(`my-call/answer`).on("value", async snapshot => {
+        const data = snapshot.val();
+        if (data && !peerConn.currentRemoteDescription) {
+          const answer = new RTCSessionDescription(JSON.parse(data));
+          await peerConn.setRemoteDescription(answer);
+          statusText.textContent = "✅ Call connected";
+          ring.pause();
+          ring.currentTime = 0;
+          startTimer();
+        }
+      });
+
+      db.ref(`my-call/receiverCandidates`).on("child_added", snapshot => {
+        const candidate = new RTCIceCandidate(JSON.parse(snapshot.val()));
+        peerConn.addIceCandidate(candidate);
+      });
+
+      hangupBtn.onclick = () => {
+        if (peerConn) peerConn.close();
+        db.ref(`my-call`).remove();
+        statusText.textContent = "Call ended.";
+        callBtn.disabled = false;
+        hangupBtn.style.display = "none";
+        muteBtn.style.display = "none";
+        timerEl.textContent = "";
+        clearInterval(timerInterval);
+      };
+    };
+
+    function startTimer() {
+      startTime = Date.now();
+      timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        timerEl.textContent = `Call Duration: ${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+      }, 1000);
+    }
   </script>
 </body>
 </html>
+
+<!-- ✅ page-b.html also available on request -->
