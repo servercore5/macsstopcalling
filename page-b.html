@@ -19,20 +19,9 @@
       box-shadow: 0 0 10px rgba(0,0,0,0.2);
       text-align: center;
     }
-    h2 {
-      margin-bottom: 10px;
-      color: #333;
-    }
-    #status {
-      margin: 10px 0 10px;
-      font-size: 16px;
-      font-weight: bold;
-    }
-    #timer {
-      margin-bottom: 20px;
-      font-size: 16px;
-      color: #888;
-    }
+    h2 { margin-bottom: 10px; color: #333; }
+    #status { margin: 10px 0; font-size: 16px; font-weight: bold; }
+    #timer { margin-bottom: 20px; font-size: 16px; color: #888; }
     button {
       margin: 10px;
       padding: 12px 24px;
@@ -42,13 +31,9 @@
       cursor: pointer;
       color: white;
     }
-    #answerBtn {
-      background-color: #4CAF50;
-    }
-    #hangupBtn {
-      background-color: #e53935;
-      display: none;
-    }
+    #answerBtn { background-color: #4CAF50; display: none; }
+    #hangupBtn { background-color: #e53935; display: none; }
+    #muteBtn { background-color: #1976d2; display: none; }
     .dialpad {
       margin-top: 20px;
       display: grid;
@@ -56,12 +41,8 @@
       gap: 10px;
       justify-content: center;
     }
-    .dialpad button {
-      background: #1976d2;
-    }
-    audio {
-      display: none;
-    }
+    .dialpad button { background: #1976d2; }
+    audio { display: none; }
   </style>
 </head>
 <body>
@@ -69,137 +50,36 @@
     <h2>Macstop Calling Portal</h2>
     <p id="status">Waiting for call...</p>
     <div id="timer"></div>
-    <button id="answerBtn" style="display:none;">Answer</button>
+    <button id="answerBtn">Answer</button>
+    <button id="muteBtn">Mute</button>
     <button id="hangupBtn">Hang Up</button>
-
     <div class="dialpad">
       <button>1</button><button>2</button><button>3</button>
       <button>4</button><button>5</button><button>6</button>
       <button>7</button><button>8</button><button>9</button>
       <button>*</button><button>0</button><button>#</button>
     </div>
-
     <audio id="remoteAudio" autoplay></audio>
     <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
   </div>
 
-  <!-- Firebase & WebRTC Scripts -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script src="script.js"></script>
   <script>
-    let peerConn;
-    let localStream;
-    let db;
-    let callId = "my-call";
-    let timerInterval;
-    let seconds = 0;
+    const muteBtn = document.getElementById("muteBtn");
+    let isMuted = false;
+    muteBtn.onclick = () => {
+      const tracks = localStream?.getAudioTracks?.();
+      if (tracks && tracks.length > 0) {
+        isMuted = !isMuted;
+        tracks[0].enabled = !isMuted;
+        muteBtn.textContent = isMuted ? "Unmute" : "Mute";
+      }
+    };
 
-    function startTimer() {
-      const timerDisplay = document.getElementById("timer");
-      timerInterval = setInterval(() => {
-        seconds++;
-        const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
-        const secs = String(seconds % 60).padStart(2, '0');
-        timerDisplay.textContent = `Call Duration: ${mins}:${secs}`;
-      }, 1000);
-    }
-
-    function stopTimer() {
-      clearInterval(timerInterval);
-      seconds = 0;
-      document.getElementById("timer").textContent = "";
-    }
-
-    function initFirebase() {
-      const firebaseConfig = {
-        apiKey: "AIzaSyAmWBSqhsChYspp8cnPwV9E7EOnyB4jcqE",
-        authDomain: "nonu-a2b10.firebaseapp.com",
-        databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId: "nonu-a2b10",
-        storageBucket: "nonu-a2b10.appspot.com",
-        messagingSenderId: "563739635078",
-        appId: "1:563739635078:web:52d355f0d9411317829007"
-      };
-      firebase.initializeApp(firebaseConfig);
-      db = firebase.database();
-    }
-
-    async function getMediaStream() {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      return localStream;
-    }
-
-    function setupReceiver() {
-      const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-      peerConn = new RTCPeerConnection(servers);
-
-      getMediaStream().then(stream => {
-        stream.getTracks().forEach(track => peerConn.addTrack(track, stream));
-      });
-
-      peerConn.ontrack = e => {
-        document.getElementById("remoteAudio").srcObject = e.streams[0];
-      };
-
-      peerConn.onicecandidate = e => {
-        if (e.candidate) {
-          db.ref(`${callId}/receiverCandidates`).push(JSON.stringify(e.candidate));
-        }
-      };
-
-      db.ref(`${callId}`).on("value", async snapshot => {
-        const data = snapshot.val();
-        if (!data) {
-          document.getElementById("status").textContent = "Call ended";
-          document.getElementById("hangupBtn").style.display = "none";
-          document.getElementById("answerBtn").style.display = "none";
-          stopTimer();
-          return;
-        }
-
-        if (data && data.offer && !peerConn.currentRemoteDescription) {
-          document.getElementById("status").innerText = "Incoming call...";
-          document.getElementById("answerBtn").style.display = "inline-block";
-          document.getElementById("ringtone").play();
-
-          document.getElementById("answerBtn").onclick = async () => {
-            document.getElementById("ringtone").pause();
-            document.getElementById("ringtone").currentTime = 0;
-
-            const offer = new RTCSessionDescription(JSON.parse(data.offer));
-            await peerConn.setRemoteDescription(offer);
-
-            const answer = await peerConn.createAnswer();
-            await peerConn.setLocalDescription(answer);
-            db.ref(`${callId}/answer`).set(JSON.stringify(answer));
-
-            document.getElementById("status").innerText = "Call connected";
-            document.getElementById("answerBtn").style.display = "none";
-            document.getElementById("hangupBtn").style.display = "inline-block";
-            startTimer();
-          };
-        }
-      });
-
-      db.ref(`${callId}/callerCandidates`).on("child_added", snapshot => {
-        const candidate = JSON.parse(snapshot.val());
-        if (peerConn.remoteDescription) {
-          peerConn.addIceCandidate(new RTCIceCandidate(candidate));
-        }
-      });
-
-      document.getElementById("hangupBtn").onclick = () => {
-        peerConn.close();
-        db.ref(callId).remove();
-        document.getElementById("status").innerText = "Call ended";
-        document.getElementById("hangupBtn").style.display = "none";
-        stopTimer();
-      };
-    }
-
-    initFirebase();
-    setupReceiver();
+    const remoteAudio = document.getElementById("remoteAudio");
+    remoteAudio.autoplay = true;
+    remoteAudio.muted = false;
+    remoteAudio.play().catch(err => console.warn("🔇 Audio autoplay failed:", err));
   </script>
 </body>
 </html>
