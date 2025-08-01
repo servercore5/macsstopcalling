@@ -63,10 +63,35 @@
     <audio id="ringtone" src="https://actions.google.com/sounds/v1/alarms/phone_alerts_and_rings.ogg" loop></audio>
   </div>
 
-  <script src="script.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAmWBSqhsChYspp8cnPwV9E7EOnyB4jcqE",
+      authDomain: "nonu-a2b10.firebaseapp.com",
+      databaseURL: "https://nonu-a2b10-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "nonu-a2b10",
+      storageBucket: "nonu-a2b10.appspot.com",
+      messagingSenderId: "563739635078",
+      appId: "1:563739635078:web:52d355f0d9411317829007"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const answerBtn = document.getElementById("answerBtn");
+    const hangupBtn = document.getElementById("hangupBtn");
     const muteBtn = document.getElementById("muteBtn");
+    const statusText = document.getElementById("status");
+    const timerEl = document.getElementById("timer");
+    const ring = document.getElementById("ringtone");
+    const audio = document.getElementById("remoteAudio");
+
+    let peerConn = null;
+    let localStream = null;
     let isMuted = false;
+    let timerInterval;
+
     muteBtn.onclick = () => {
       const tracks = localStream?.getAudioTracks?.();
       if (tracks && tracks.length > 0) {
@@ -76,10 +101,95 @@
       }
     };
 
-    const remoteAudio = document.getElementById("remoteAudio");
-    remoteAudio.autoplay = true;
-    remoteAudio.muted = false;
-    remoteAudio.play().catch(err => console.warn("🔇 Audio autoplay failed:", err));
+    function startTimer() {
+      let seconds = 0;
+      timerInterval = setInterval(() => {
+        seconds++;
+        const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const secs = String(seconds % 60).padStart(2, '0');
+        timerEl.textContent = `Call Duration: ${mins}:${secs}`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+      timerEl.textContent = "";
+    }
+
+    async function setupReceiver() {
+      const servers = {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:relay1.expressturn.com:3478",
+            username: "efh4VvB3Zzq0PW0vwXxY",
+            credential: "tZjNFGnDqR3RFLQf"
+          }
+        ]
+      };
+      peerConn = new RTCPeerConnection(servers);
+
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStream.getTracks().forEach(track => peerConn.addTrack(track, localStream));
+
+      peerConn.ontrack = e => {
+        console.log("🔊 Got remote stream:", e.streams[0]);
+        audio.srcObject = e.streams[0];
+      };
+
+      peerConn.onicecandidate = e => {
+        if (e.candidate) {
+          db.ref(`my-call/receiverCandidates`).push(JSON.stringify(e.candidate));
+        }
+      };
+
+      db.ref(`my-call`).on("value", async snapshot => {
+        const data = snapshot.val();
+        if (!data) return;
+
+        if (data.offer && !peerConn.currentRemoteDescription) {
+          statusText.textContent = "📞 Incoming call...";
+          answerBtn.style.display = "inline-block";
+          hangupBtn.style.display = "inline-block";
+          muteBtn.style.display = "inline-block";
+          ring.play();
+
+          answerBtn.onclick = async () => {
+            ring.pause();
+            ring.currentTime = 0;
+
+            const offer = new RTCSessionDescription(JSON.parse(data.offer));
+            await peerConn.setRemoteDescription(offer);
+
+            const answer = await peerConn.createAnswer();
+            await peerConn.setLocalDescription(answer);
+            db.ref(`my-call/answer`).set(JSON.stringify(answer));
+
+            statusText.textContent = "✅ Call connected";
+            answerBtn.style.display = "none";
+            audio.play().catch(err => console.warn("Remote audio play failed:", err));
+            startTimer();
+          };
+        }
+      });
+
+      db.ref(`my-call/callerCandidates`).on("child_added", snapshot => {
+        const candidate = new RTCIceCandidate(JSON.parse(snapshot.val()));
+        peerConn.addIceCandidate(candidate);
+      });
+
+      hangupBtn.onclick = () => {
+        if (peerConn) peerConn.close();
+        db.ref(`my-call`).remove();
+        statusText.textContent = "Call ended.";
+        answerBtn.style.display = "none";
+        hangupBtn.style.display = "none";
+        muteBtn.style.display = "none";
+        stopTimer();
+      };
+    }
+
+    setupReceiver();
   </script>
 </body>
 </html>
